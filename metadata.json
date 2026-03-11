@@ -1,0 +1,5 @@
+{
+  "name": "System Ewidencji Pracy",
+  "description": "Aplikacja do zarządzania czasem pracy w systemie rotacyjnym oraz archiwizacji wypłat.",
+  "requestFramePermissions": []
+}
