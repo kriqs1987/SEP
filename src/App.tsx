@@ -11,19 +11,31 @@ import { PayoutList } from './components/PayoutList';
 import { SettingsForm } from './components/SettingsForm';
 import { api } from './api';
 import { WorkEvent, Payout, Settings } from './types';
-import { Briefcase, FileCheck, Calendar as CalendarIcon, Wallet, Settings as SettingsIcon } from 'lucide-react';
+import { Briefcase, FileCheck, Calendar as CalendarIcon, Wallet, Settings as SettingsIcon, LogOut } from 'lucide-react';
+import { auth } from './firebase';
+import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 
 export default function App() {
+  const [user, setUser] = useState(auth.currentUser);
+  const [loadingAuth, setLoadingAuth] = useState(true);
+
   const [events, setEvents] = useState<WorkEvent[]>([]);
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [activeTab, setActiveTab] = useState<'calendar' | 'payouts' | 'settings'>('calendar');
 
-  const [eventToDelete, setEventToDelete] = useState<number | null>(null);
+  const [eventToDelete, setEventToDelete] = useState<string | null>(null);
 
   useEffect(() => {
-    loadData();
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setUser(user);
+      setLoadingAuth(false);
+      if (user) {
+        loadData();
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
   const loadData = async () => {
@@ -41,6 +53,50 @@ export default function App() {
     }
   };
 
+  const handleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error('Login error', error);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setEvents([]);
+      setPayouts([]);
+      setSettings(null);
+    } catch (error) {
+      console.error('Logout error', error);
+    }
+  };
+
+  if (loadingAuth) {
+    return <div className="min-h-screen flex items-center justify-center bg-gray-50">Ładowanie...</div>;
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
+        <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 max-w-md w-full text-center">
+          <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-sm mx-auto mb-6">
+            <Briefcase className="w-8 h-8" />
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">System Ewidencji Pracy</h1>
+          <p className="text-gray-500 mb-8">Zaloguj się, aby zarządzać swoim czasem pracy i wypłatami.</p>
+          <button
+            onClick={handleLogin}
+            className="w-full bg-indigo-600 text-white py-3 px-4 rounded-xl font-medium hover:bg-indigo-700 transition-colors"
+          >
+            Zaloguj się przez Google
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const handleDateClick = (date: Date) => {
     setSelectedDate(date);
   };
@@ -53,7 +109,7 @@ export default function App() {
   const handlePayoutSuccess = (newPayout: Payout) => {
     setPayouts([newPayout, ...payouts]);
     loadData(); // Reload to get updated event links
-    setActiveTab('payouts'); // Optionally switch to payouts tab or stay
+    setActiveTab('payouts');
   };
 
   const handleDeleteEvent = async () => {
@@ -75,18 +131,26 @@ export default function App() {
             <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-sm">
               <Briefcase className="w-5 h-5" />
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-gray-900">
+            <h1 className="text-xl font-bold tracking-tight text-gray-900 hidden sm:block">
               System Ewidencji Pracy
             </h1>
           </div>
           <div className="flex items-center gap-4 text-sm font-medium text-gray-500">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-amber-100 border border-amber-200"></div>
-              Nieopłacone
+            <div className="hidden sm:flex items-center gap-4 mr-4">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-amber-100 border border-amber-200"></div>
+                Nieopłacone
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-emerald-100 border border-emerald-200"></div>
+                Opłacone
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-emerald-100 border border-emerald-200"></div>
-              Opłacone
+            <div className="flex items-center gap-3 border-l border-gray-200 pl-4">
+              <img src={user.photoURL || ''} alt="Avatar" className="w-8 h-8 rounded-full border border-gray-200" />
+              <button onClick={handleLogout} className="text-gray-400 hover:text-gray-600" title="Wyloguj">
+                <LogOut className="w-5 h-5" />
+              </button>
             </div>
           </div>
         </div>

@@ -1,0 +1,114 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users/{userId}/work_events
+    // Document ID: {eventId}
+    // Fields:
+    //   - date: string (required)
+    //   - start_time: string (required)
+    //   - end_time: string (required)
+    //   - break_minutes: number (required)
+    //   - net_hours: number (required)
+    //   - payout_id: string (optional)
+    //   - created_at: string (required)
+    //
+    // Collection: users/{userId}/payouts
+    // Document ID: {payoutId}
+    // Fields:
+    //   - date_from: string (required)
+    //   - date_to: string (required)
+    //   - amount_net: number (required)
+    //   - amount_gross: number (required)
+    //   - document_url: string (optional)
+    //   - created_at: string (required)
+    //
+    // Collection: users/{userId}/settings
+    // Document ID: {settingId}
+    // Fields:
+    //   - default_start_time: string (required)
+    //   - default_end_time: string (required)
+    //   - default_break_minutes: number (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+       return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+       return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasRequiredFields(fields) {
+       return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidWorkEvent(data) {
+      return hasOnlyAllowedFields(['date', 'start_time', 'end_time', 'break_minutes', 'net_hours', 'payout_id', 'created_at']) &&
+             data.date is string && data.date.size() == 10 &&
+             data.start_time is string && data.start_time.size() <= 5 &&
+             data.end_time is string && data.end_time.size() <= 5 &&
+             data.break_minutes is number && data.break_minutes >= 0 &&
+             data.net_hours is number && data.net_hours >= 0 &&
+             (!('payout_id' in data) || data.payout_id == null || (data.payout_id is string && data.payout_id.size() <= 100)) &&
+             data.created_at is string && data.created_at.size() <= 30;
+    }
+
+    function isValidPayout(data) {
+      return hasOnlyAllowedFields(['date_from', 'date_to', 'amount_net', 'amount_gross', 'document_url', 'created_at']) &&
+             data.date_from is string && data.date_from.size() == 10 &&
+             data.date_to is string && data.date_to.size() == 10 &&
+             data.amount_net is number && data.amount_net >= 0 &&
+             data.amount_gross is number && data.amount_gross >= 0 &&
+             (!('document_url' in data) || data.document_url == null || (data.document_url is string && data.document_url.size() <= 1048576)) && // 1MB limit for base64
+             data.created_at is string && data.created_at.size() <= 30;
+    }
+
+    function isValidSettings(data) {
+      return hasOnlyAllowedFields(['default_start_time', 'default_end_time', 'default_break_minutes']) &&
+             data.default_start_time is string && data.default_start_time.size() <= 5 &&
+             data.default_end_time is string && data.default_end_time.size() <= 5 &&
+             data.default_break_minutes is number && data.default_break_minutes >= 0;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId}/work_events/{eventId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidWorkEvent(request.resource.data);
+      allow update: if isOwner(userId) && isValidWorkEvent(request.resource.data);
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/payouts/{payoutId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidPayout(request.resource.data);
+      allow update: if isOwner(userId) && isValidPayout(request.resource.data);
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/settings/{settingId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidSettings(request.resource.data);
+      allow update: if isOwner(userId) && isValidSettings(request.resource.data);
+      allow delete: if isOwner(userId);
+    }
+  }
+}

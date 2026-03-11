@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { api } from '../api';
-import { Payout } from '../types';
+import { Payout, WorkEvent } from '../types';
 
 interface Props {
   onSuccess: (payout: Payout) => void;
@@ -11,9 +11,44 @@ export function PayoutForm({ onSuccess }: Props) {
   const [dateTo, setDateTo] = useState('');
   const [amountNet, setAmountNet] = useState('');
   const [amountGross, setAmountGross] = useState('');
-  const [file, setFile] = useState<File | null>(null);
+  const [documentBase64, setDocumentBase64] = useState<string | null>(null);
+  
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [unpaidEvents, setUnpaidEvents] = useState<WorkEvent[]>([]);
+
+  useEffect(() => {
+    loadUnpaidEvents();
+  }, []);
+
+  const loadUnpaidEvents = async () => {
+    try {
+      const events = await api.getWorkEvents();
+      setUnpaidEvents(events.filter(e => !e.payout_id));
+    } catch (err) {
+      console.error('Failed to load unpaid events', err);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 500 * 1024) {
+        setError('Plik jest za duży. Maksymalny rozmiar to 500KB.');
+        e.target.value = '';
+        setDocumentBase64(null);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setDocumentBase64(reader.result as string);
+        setError('');
+      };
+      reader.readAsDataURL(file);
+    } else {
+      setDocumentBase64(null);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,23 +56,34 @@ export function PayoutForm({ onSuccess }: Props) {
     setError('');
 
     try {
-      const formData = new FormData();
-      formData.append('date_from', dateFrom);
-      formData.append('date_to', dateTo);
-      formData.append('amount_net', amountNet);
-      formData.append('amount_gross', amountGross);
-      if (file) {
-        formData.append('document', file);
+      // Find events that fall within the selected date range
+      const eventsInPeriod = unpaidEvents.filter(
+        event => event.date >= dateFrom && event.date <= dateTo
+      );
+
+      if (eventsInPeriod.length === 0) {
+        throw new Error('Brak nieopłaconych dni pracy w wybranym okresie.');
       }
 
-      const newPayout = await api.createPayout(formData);
+      const eventIds = eventsInPeriod.map(e => e.id);
+
+      const newPayout = await api.createPayout({
+        date_from: dateFrom,
+        date_to: dateTo,
+        amount_net: parseFloat(amountNet),
+        amount_gross: parseFloat(amountGross),
+        document_url: documentBase64,
+      }, eventIds);
+
       onSuccess(newPayout);
+      
       // Reset form
       setDateFrom('');
       setDateTo('');
       setAmountNet('');
       setAmountGross('');
-      setFile(null);
+      setDocumentBase64(null);
+      loadUnpaidEvents();
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -100,11 +146,11 @@ export function PayoutForm({ onSuccess }: Props) {
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Dokument (Payslip)</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Dokument (max 500KB)</label>
         <input
           type="file"
           accept=".pdf,.png,.jpg,.jpeg"
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
+          onChange={handleFileChange}
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
         />
       </div>

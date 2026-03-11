@@ -1,87 +1,94 @@
+import { collection, doc, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, getDoc, setDoc } from 'firebase/firestore';
+import { db, auth } from './firebase';
 import { WorkEvent, Payout, Settings } from './types';
 
-async function fetchJson<T>(url: string, options?: RequestInit, retries = 3): Promise<T> {
-  try {
-    const res = await fetch(url, options);
-    const text = await res.text();
-    
-    // If we receive the "Please wait" HTML page from the proxy, the server is restarting
-    if (text.trim().toLowerCase().startsWith('<!doctype')) {
-      if (retries > 0) {
-        console.warn(`Received HTML from ${url}, retrying in 1s... (${retries} retries left)`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        return fetchJson<T>(url, options, retries - 1);
-      }
-      throw new Error('Server is currently restarting. Please try again in a moment.');
-    }
-    
-    if (!res.ok) {
-      console.error(`API Error (${url}):`, text);
-      let errorMessage = `Błąd serwera (status ${res.status})`;
-      try {
-        const errJson = JSON.parse(text);
-        if (errJson.error) {
-          errorMessage = errJson.error;
-        } else if (errJson.message) {
-          errorMessage = errJson.message;
-        }
-      } catch (e) {
-        if (text && !text.toLowerCase().startsWith('<!doctype')) {
-          errorMessage = text.length > 100 ? text.substring(0, 100) + '...' : text;
-        }
-      }
-      throw new Error(errorMessage);
-    }
-    
-    return JSON.parse(text);
-  } catch (error) {
-    if (retries > 0 && error instanceof TypeError) {
-      // Network error (connection refused), retry
-      console.warn(`Network error for ${url}, retrying in 1s... (${retries} retries left)`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      return fetchJson<T>(url, options, retries - 1);
-    }
-    throw error;
-  }
-}
+const getUserId = () => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Użytkownik nie jest zalogowany');
+  return user.uid;
+};
 
 export const api = {
   async getWorkEvents(): Promise<WorkEvent[]> {
-    return fetchJson<WorkEvent[]>('/api/work-events');
+    const uid = getUserId();
+    const q = query(
+      collection(db, 'users', uid, 'work_events'),
+      orderBy('date', 'desc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WorkEvent));
   },
 
   async createWorkEvent(data: Partial<WorkEvent>): Promise<WorkEvent> {
-    return fetchJson<WorkEvent>('/api/work-events', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
+    const uid = getUserId();
+    const newEvent = {
+      date: data.date!,
+      start_time: data.start_time!,
+      end_time: data.end_time!,
+      break_minutes: data.break_minutes!,
+      net_hours: data.net_hours!,
+      payout_id: null,
+      created_at: new Date().toISOString(),
+    };
+    const docRef = await addDoc(collection(db, 'users', uid, 'work_events'), newEvent);
+    return { id: docRef.id, ...newEvent } as WorkEvent;
   },
 
-  async deleteWorkEvent(id: number): Promise<void> {
-    await fetchJson<void>(`/api/work-events/${id}`, { method: 'DELETE' });
+  async deleteWorkEvent(id: string): Promise<void> {
+    const uid = getUserId();
+    await deleteDoc(doc(db, 'users', uid, 'work_events', id));
   },
 
   async getPayouts(): Promise<Payout[]> {
-    return fetchJson<Payout[]>('/api/payouts');
+    const uid = getUserId();
+    const q = query(
+      collection(db, 'users', uid, 'payouts'),
+      orderBy('date_from', 'desc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Payout));
   },
 
-  async createPayout(formData: FormData): Promise<Payout> {
-    return fetchJson<Payout>('/api/payouts', {
-      method: 'POST',
-      body: formData,
-    });
+  async createPayout(data: Omit<Payout, 'id' | 'created_at'>, eventIds: string[]): Promise<Payout> {
+    const uid = getUserId();
+    const newPayout = {
+      ...data,
+      created_at: new Date().toISOString(),
+    };
+    
+    const docRef = await addDoc(collection(db, 'users', uid, 'payouts'), newPayout);
+    const payoutId = docRef.id;
+
+    for (const eventId of eventIds) {
+      await updateDoc(doc(db, 'users', uid, 'work_events', eventId), {
+        payout_id: payoutId
+      });
+    }
+
+    return { id: payoutId, ...newPayout } as Payout;
   },
 
-  async getSettings(): Promise<Settings> {
-    return fetchJson<Settings>('/api/settings');
+  async getSettings(): Promise<Settings | null> {
+    const uid = getUserId();
+    const docRef = doc(db, 'users', uid, 'settings', 'default');
+    const snapshot = await getDoc(docRef);
+    if (snapshot.exists()) {
+      return { id: snapshot.id, ...snapshot.data() } as Settings;
+    }
+    return null;
   },
 
   async updateSettings(data: Partial<Settings>): Promise<Settings> {
-    return fetchJson<Settings>('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
+    const uid = getUserId();
+    const docRef = doc(db, 'users', uid, 'settings', 'default');
+    
+    const settingsData = {
+      default_start_time: data.default_start_time || '08:00',
+      default_end_time: data.default_end_time || '16:00',
+      default_break_minutes: data.default_break_minutes || 0,
+    };
+
+    await setDoc(docRef, settingsData, { merge: true });
+    return { id: 'default', ...settingsData } as Settings;
   },
 };

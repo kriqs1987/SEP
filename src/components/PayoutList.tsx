@@ -43,8 +43,7 @@ export function PayoutList({ payouts }: Props) {
                   {payout.document_url ? (
                     <a
                       href={payout.document_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                      download={`rozliczenie_${payout.date_from}_${payout.date_to}`}
                       className="inline-flex items-center gap-2 text-indigo-600 hover:text-indigo-800 font-medium"
                     >
                       <FileText className="w-4 h-4" />

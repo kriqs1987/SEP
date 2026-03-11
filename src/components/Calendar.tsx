@@ -10,7 +10,7 @@ interface Props {
   events: WorkEvent[];
   payouts: Payout[];
   onDateClick: (date: Date) => void;
-  onDeleteEvent: (id: number) => void;
+  onDeleteEvent: (id: string) => void;
 }
 
 export function Calendar({ events, payouts, onDateClick, onDeleteEvent }: Props) {
